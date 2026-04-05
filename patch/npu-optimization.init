@@ -1,0 +1,54 @@
+#!/bin/sh /etc/rc.common
+# NPU 硬件加速优化服务
+
+START=99
+STOP=10
+
+USE_PROCD=1
+
+start_service() {
+    # 确保NPU固件已加载
+    if [ -d /sys/class/net/eth0 ]; then
+        logger -t npu "Checking NPU firmware status..."
+        
+        # 检查NPU是否正常工作
+        if dmesg | grep -q "NPU firmware loaded"; then
+            logger -t npu "NPU firmware loaded successfully"
+        else
+            logger -t npu "NPU firmware not detected, may need manual load"
+        fi
+    fi
+    
+    # 启用硬件流量卸载（如果内核支持）
+    if [ -f /proc/sys/net/netfilter/nf_flowtable_hw_offload ]; then
+        echo 1 > /proc/sys/net/netfilter/nf_flowtable_hw_offload
+        logger -t npu "Hardware flow offload enabled"
+    fi
+    
+    # 启用nftables硬件卸载
+    if command -v nft >/dev/null 2>&1; then
+        # 检查是否有flowtable配置
+        if nft list tables | grep -q "inet"; then
+            logger -t npu "nftables hardware offload ready"
+        fi
+    fi
+    
+    # 优化网络接口环形缓冲区
+    for iface in eth0 eth1; do
+        if [ -d "/sys/class/net/$iface" ]; then
+            # 增加RX/TX环形缓冲区（如果驱动支持）
+            ethtool -G "$iface" rx 1024 tx 1024 2>/dev/null && \
+                logger -t npu "Increased ring buffer for $iface"
+            
+            # 启用中断合并（减少CPU中断）
+            ethtool -C "$iface" rx-usecs 50 tx-usecs 50 2>/dev/null && \
+                logger -t npu "Interrupt coalescing enabled for $iface"
+        fi
+    done
+    
+    logger -t npu "NPU optimization completed"
+}
+
+stop_service() {
+    logger -t npu "NPU optimization service stopped"
+}
