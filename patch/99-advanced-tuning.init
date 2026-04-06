@@ -1,0 +1,112 @@
+#!/bin/sh
+# 高级网络性能调优脚本 - 2GB RAM 专属
+# 在 99-performance-tuning.sh 之后运行
+
+START=99
+
+boot() {
+    sleep 15
+    
+    # ============================================================
+    # 网络硬件加速检测与启用
+    # ============================================================
+    
+    # 检测并启用 flow offload
+    if [ -f /proc/sys/net/netfilter/nf_flowtable_tcp_timeout ]; then
+        echo 600 > /proc/sys/net/netfilter/nf_flowtable_tcp_timeout
+        echo 120 > /proc/sys/net/netfilter/nf_flowtable_udp_timeout
+        logger -t advanced-perf "Flow offload timeout configured"
+    fi
+    
+    # ============================================================
+    # 智能队列管理（CAKE）
+    # ============================================================
+    
+    # 为 WAN 口启用 CAKE QoS（如果已安装）
+    if command -v tc >/dev/null 2>&1 && lsmod | grep -q sch_cake; then
+        WAN_IF=$(uci -q get network.wan.device || echo "eth1")
+        
+        # 清除现有队列规则
+        tc qdisc del dev "$WAN_IF" root 2>/dev/null
+        
+        # 应用 CAKE（假设带宽 1Gbps，根据实际调整）
+        tc qdisc add dev "$WAN_IF" root cake bandwidth 1000Mbit \
+            besteffort triple-isolate nat wash ack-filter
+        
+        logger -t advanced-perf "CAKE QoS enabled on $WAN_IF"
+    fi
+    
+    # ============================================================
+    # RPS/RPS 多核网络处理
+    # ============================================================
+    
+    # 启用 RPS（Receive Packet Steering）分散网络负载到多核
+    CPU_COUNT=$(grep -c ^processor /proc/cpuinfo)
+    if [ "$CPU_COUNT" -gt 1 ]; then
+        RPS_MASK=$(printf '%x' $((2**CPU_COUNT - 1)))
+        
+        for rps in /sys/class/net/eth*/queues/rx-*/rps_cpus; do
+            [ -f "$rps" ] && echo "$RPS_MASK" > "$rps"
+        done
+        
+        logger -t advanced-perf "RPS enabled for $CPU_COUNT cores (mask: $RPS_MASK)"
+    fi
+    
+    # ============================================================
+    # 连接跟踪优化（针对代理场景）
+    # ============================================================
+    
+    # 缩短代理连接的超时时间，释放资源
+    if [ -d /proc/sys/net/netfilter ]; then
+        echo 300 > /proc/sys/net/netfilter/nf_conntrack_tcp_timeout_time_wait 2>/dev/null
+        echo 60 > /proc/sys/net/netfilter/nf_conntrack_tcp_timeout_close_wait 2>/dev/null
+        echo 30 > /proc/sys/net/netfilter/nf_conntrack_tcp_timeout_fin_wait 2>/dev/null
+        
+        logger -t advanced-perf "Conntrack timeouts optimized for proxy"
+    fi
+    
+    # ============================================================
+    # 内存碎片整理
+    # ============================================================
+    
+    # 定期整理内存碎片（每小时一次）
+    (
+        while true; do
+            sleep 3600
+            echo 1 > /proc/sys/vm/compact_memory 2>/dev/null
+        done
+    ) &
+    
+    # ============================================================
+    # 智能 ZRAM 调优
+    # ============================================================
+    
+    # 根据实际内存使用动态调整 zram 压缩算法
+    if [ -d /sys/block/zram0 ]; then
+        # 检查是否支持 zstd（更好的压缩率和速度）
+        if grep -q zstd /sys/block/zram0/comp_algorithm 2>/dev/null; then
+            echo zstd > /sys/block/zram0/comp_algorithm
+            logger -t advanced-perf "ZRAM algorithm set to zstd"
+        fi
+    fi
+    
+    # ============================================================
+    # DNS 缓存预热
+    # ============================================================
+    
+    # 预解析常用域名，加速首次访问
+    (
+        sleep 30
+        for domain in www.google.com www.github.com www.cloudflare.com; do
+            nslookup "$domain" 127.0.0.1 >/dev/null 2>&1
+        done
+        logger -t advanced-perf "DNS cache prewarmed"
+    ) &
+    
+    # ============================================================
+    # 完成日志
+    # ============================================================
+    
+    logger -t advanced-perf "Advanced performance tuning completed"
+    logger -t advanced-perf "System ready for high-performance routing"
+}
