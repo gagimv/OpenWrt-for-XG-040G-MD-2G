@@ -153,7 +153,33 @@ jobs:
           mkdir -p openwrt/files/etc/sysctl.d
           cp -fv patch/99-memory-optimization.conf openwrt/files/etc/sysctl.d/
           
-          echo "✓ Firmware customizations applied"
+          # Install rpcd timeout fix
+          mkdir -p openwrt/files/etc/init.d
+          cp -fv patch/rpcd-fix.init openwrt/files/etc/init.d/rpcd
+          chmod +x openwrt/files/etc/init.d/rpcd
+          
+          # Install performance tuning scripts
+          cp -fv patch/99-performance-tuning.sh openwrt/files/etc/init.d/
+          chmod +x openwrt/files/etc/init.d/99-performance-tuning.sh
+          
+          # Install advanced tuning script
+          cp -fv patch/99-advanced-tuning.init openwrt/files/etc/init.d/advanced-tuning
+          chmod +x openwrt/files/etc/init.d/advanced-tuning
+          
+          # Install health monitor
+          mkdir -p openwrt/files/usr/bin
+          cp -fv patch/health-monitor.sh openwrt/files/usr/bin/
+          chmod +x openwrt/files/usr/bin/health-monitor.sh
+          
+          # Install crontab
+          mkdir -p openwrt/files/etc/crontabs
+          cp -fv patch/crontab openwrt/files/etc/crontabs/root
+          
+          # Copy dnsmasq configuration
+          mkdir -p openwrt/files/etc/dnsmasq.d
+          cp -fv patch/dnsmasq.conf openwrt/files/etc/dnsmasq.d/custom.conf
+          
+          echo "✓ All firmware customizations applied"
 
       - name: Install third-party packages (homeproxy, passwall)
         working-directory: ./openwrt/package
